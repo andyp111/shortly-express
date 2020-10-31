@@ -3,8 +3,9 @@ const path = require('path');
 const utils = require('./lib/hashUtils');
 const partials = require('express-partials');
 const bodyParser = require('body-parser');
-const Auth = require('./middleware/auth');
+const Auth = require('./middleware/auth.js');
 const models = require('./models');
+const parseCookies = require('./middleware/cookieParser.js');
 
 
 const app = express();
@@ -16,11 +17,14 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
+app.use(parseCookies);
+app.use(Auth.createSession);
 
 
 app.get('/',
   (req, res) => {
     res.render('index');
+    // console.log(req.get('Cookie'));
   });
 
 app.get('/create',
@@ -48,29 +52,29 @@ app.post('/links',
     }
 
     return models.Links.get({ url })
-      .then(link => {
+      .then((link) => {
         if (link) {
           throw link;
         }
         return models.Links.getUrlTitle(url);
       })
-      .then(title => {
+      .then((title) => {
         return models.Links.create({
           url: url,
           title: title,
-          baseUrl: req.headers.origin
+          baseUrl: req.headers.origin,
         });
       })
-      .then(results => {
+      .then((results) => {
         return models.Links.get({ id: results.insertId });
       })
-      .then(link => {
+      .then((link) => {
         throw link;
       })
-      .error(error => {
+      .error((error) => {
         res.status(500).send(error);
       })
-      .catch(link => {
+      .catch((link) => {
         res.status(200).send(link);
       });
   });
@@ -78,12 +82,32 @@ app.post('/links',
 /************************************************************/
 // Write your authentication routes here
 /************************************************************/
+
 // '/signup'
 app.post('/signup', (req, res) => {
-  console.log(req.body);
-  let { username, password } = req.body;
-  models.Users.create({ username, password });
-  res.render('login');
+  // console.log(req.body);
+  let username = req.body.username;
+  let password = req.body.password;
+  return models.Users.get({username})
+    .then((user) => {
+      if (user) {
+        throw user;
+      } else {
+        return models.Users.create({username, password});
+      }
+    })
+    .then(() => {
+      res.redirect('/');
+    })
+    .catch(() => {
+      res.redirect('/signup');
+    })
+    // .then(() => {
+    //   redirect('/signup');
+    // })
+    .error((error) => {
+      res.status(500).send(error);
+    });
 });
 
 app.get('/signup', (req, res) => {
@@ -92,22 +116,32 @@ app.get('/signup', (req, res) => {
   res.render('signup');
 });
 // '/login'
+// app.use(parseCookies());
+
+
 app.get('/login', (req, res) => {
-  console.log('login page');
+  console.log('req', req);
+  // console.log('req.cookies', req.cookie);
   res.status(200);
   res.render('login');
+
 });
 
 app.post('/login', (req, res) => {
-  console.log(req.body);
+  // console.log(req.cookies);
   let username = req.body.username;
   let password = req.body.password;
+  // console.log('Cookies:', req.cookies);
   return models.Users.get({username})
     .then(user => {
       if (!user || !models.Users.compare(password, user.password, user.salt)) {
         throw new Error ('username and password do not match');
       }
     })
+    // .tap(() => {
+    //   req.session.name = {username: req.body.username};
+    //   // console.log(req.session.name);
+    // })
     .then(() => {
       res.redirect('/');
     })
@@ -115,6 +149,7 @@ app.post('/login', (req, res) => {
       res.redirect('/login');
     });
 });
+
 /************************************************************/
 // Handle the code parameter route last - if all other routes fail
 // assume the route is a short code and try and handle it here.
